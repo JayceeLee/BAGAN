@@ -132,7 +132,7 @@ if __name__ == "__main__":
 				fake = G(noise)
 	
 				_, D_fake = D(fake.detach())	# Fake image...
-				D_loss_fake = criterion(D_fake, fake_label)	# Hmmmm...... fake_label? or z_label?
+				D_loss_fake = criterion(D_fake, z_label)	# Hmmmm...... fake_label? or z_label?
 		
 				D_loss = D_loss_real + D_loss_fake
 				D_losses.update(D_loss.item())
