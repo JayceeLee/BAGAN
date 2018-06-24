@@ -108,7 +108,7 @@ if __name__ == "__main__":
 				batch_size = input.size(0)
 				fake_num = math.ceil(batch_size/config.class_num)	# For each batch, 1/(n+1) of total images are fake
 				conditional_z, z_label = conditional_latenent_generat(distribution, config.class_num, fake_num)
-				
+	
 				label = label.long().squeeze() # "squeeze" : [batch, 1] --> [batch] ... e.g) [1,2,3,4...]		
 
 				if use_cuda:
@@ -121,7 +121,6 @@ if __name__ == "__main__":
 					real_label = real_label.cuda(gpu) 
 				
 				D_loss_real = criterion(D_real, real_label)
-		
 				noise = conditional_z.view(-1, config.z_dim, 1, 1)
 	
 				fake_label.resize_(noise.shape[0]).fill_(config.class_num)	# fake_label = '(num_class)+1'

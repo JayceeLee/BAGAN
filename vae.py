@@ -145,11 +145,14 @@ if __name__ == "__main__":
 		print("Class Conditional Generator - Use Pretrained Model")
 		if use_cuda:
 			encoder = encoder.cuda(gpu)
+			decoder = decoder.cuda(gpu)
 		encoder.load_state_dict(torch.load(os.path.join(os.path.join(args.checkpoint_dir, "vae"), "encoder_epoch_"+ str(config.epoches-1) + ".pth.tar"))['state_dict'])
+		decoder.load_state_dict(torch.load(os.path.join(os.path.join(args.checkpoint_dir, "vae"), "decoder_epoch_"+ str(config.epoches-1) + ".pth.tar"))['state_dict'])
 		#Z = np.empty([config.class_num, config.z_dim], dtype=float)
 		# Z : [label-1, labe-2, ... ]
 		# Z[label-1] : [[z1], [z2], ... ] (#labeld_data, #z_dim)
 		encoder.eval()
+		decoder.eval()
 		Z = []
 		with torch.no_grad():
 			for i in range(config.class_num):
@@ -172,6 +175,13 @@ if __name__ == "__main__":
 				#print("{}th Z : {}".format(i+1, Z[i][1:].shape))
 				#print("{}-class  mean : {}".format(i+1, label_mean.shape))
 				#print("{}-class covariance : {}".format(i+1, label_cov.shape))
-				N.append(mn.MultivariateNormal(label_mean, label_cov))
+				m = mn.MultivariateNormal(label_mean, label_cov)
+				sample = m.sample((64,))
+				print(sample.shape)
+				if use_cuda:
+					sample = sample.cuda(gpu)
+				fake = decoder(sample.view(-1, config.z_dim, 1, 1))
+				plot_result2(fake, config.image_size, i, 'data/gan/samples', 'ssgan', is_gray=(config.c_dim == 1))
+				N.append(m)
 
 			torch.save({'distribution': N}, os.path.join(args.distribution_dir, 'class_distribution')+'.dt')

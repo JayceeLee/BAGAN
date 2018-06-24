@@ -20,7 +20,7 @@ def conditional_latenent_generat(distribution, class_num, gen_num):	# gen_num : 
 	gen_each = math.ceil(gen_num/class_num)
 	fake_z = distribution[0].sample((gen_each,))
 	label_z = torch.zeros(gen_each, dtype=torch.long)
-	tmp = label_z
+	tmp = torch.zeros(gen_each, dtype=torch.long)
 	for i in range(1, class_num):
 		fake_z = torch.cat((fake_z, distribution[i].sample((gen_each,))), dim=0)	# [fake_each, z_dim]
 		label_z = torch.cat((label_z, tmp.fill_(i)), dim=0)	# because just 1-dim
