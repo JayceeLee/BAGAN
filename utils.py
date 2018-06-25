@@ -16,18 +16,12 @@ import sys
 import time
 import math
 
-def conditional_latenent_generat(distribution, class_num, gen_num):	# gen_num : the number of fake images per batch
-	gen_each = math.ceil(gen_num/class_num)
-	fake_z = distribution[0].sample((gen_each,))
-	label_z = torch.zeros(gen_each, dtype=torch.long)
-	tmp = torch.zeros(gen_each, dtype=torch.long)
-	for i in range(1, class_num):
-		fake_z = torch.cat((fake_z, distribution[i].sample((gen_each,))), dim=0)	# [fake_each, z_dim]
-		label_z = torch.cat((label_z, tmp.fill_(i)), dim=0)	# because just 1-dim
-	#print("fake_z size : {}".format(fake_z.shape))
-	#print("label_z size : {}".format(label_z.shape))
-	#print(label_z)
-	return fake_z, label_z
+def conditional_latent_generator(distribution, class_num, batch):
+	class_labels = torch.randint(0, class_num, (batch,), dtype=torch.long)
+	fake_z = distribution[class_labels[0].item()].sample((1,))
+	for c in class_labels[1:]:
+		fake_z = torch.cat((fake_z, distribution[c.item()].sample((1,))), dim=0)
+	return fake_z, class_labels
 	
 
 def batch2one(Z, y, z, class_num):
@@ -80,6 +74,12 @@ def Config(filename):
         print('{}: {}'.format(x, parser[x]))
     return parser
 
+def normalize(image):
+        im = Image.open(image)
+        im_normalized = im.resize((128,128), resample=Image.BILINEAR)
+        #im_normalized.save(norm_path)
+        return im_normalized
+
 IMG_EXTENSIONS = [
     '.jpg', '.JPG', '.jpeg', '.JPEG',
     '.png', '.PNG', '.ppm', '.PPM', '.bmp', '.BMP',
@@ -88,16 +88,24 @@ IMG_EXTENSIONS = [
 def is_image_file(filename):
     return any(filename.endswith(extension) for extension in IMG_EXTENSIONS)
 
-def make_dataset(dir):
-    images = []
-    for root, _, fnames in sorted(os.walk(dir)):
-        for fname in sorted(fnames):
-            if is_image_file(fname):
-                path = os.path.join(root, fname)
-                item = (path, 0)
-                images.append(item)
+def make_dataset(root):
+        mal_class = [x for x in os.listdir(root) if x[0] != "."]
 
-    return images
+        print("Found data classes !!!")
+        print(mal_class)
+
+        images = []
+        for parent, dirs, files in sorted(os.walk(root)):
+                for fname in sorted(files):
+                        if is_image_file(fname):
+                                path = os.path.join(parent, fname)
+                                x = mal_class.index(parent.split('/')[-1])
+                                label = torch.LongTensor(1).fill_(x)
+                                item = (path, label, path)
+                                images.append(item)
+
+        return images
+
 
 def default_loader(path):
     return Image.open(path).convert('RGB')
@@ -120,18 +128,45 @@ class ImageFolder(data.Dataset):
         self.loader = loader
 
     def __getitem__(self, index):
-        path, target = self.imgs[index]
+        path, label = self.imgs[index]
         img = self.loader(path)
         if self.transform is not None:
             img = self.transform(img)
         if self.target_transform is not None:
             target = self.target_transform(target)
 
-        return img, target, path
+        return img, label, path
 
     def __len__(self):
         return len(self.imgs)
 
+
+class CustomData(data.Dataset):
+        def __init__(self, root, transform=None, loader=default_loader):
+                images = make_dataset(root)
+                if len(images) == 0:
+                        Raise(RuntimeError("Found 0 images in subfolders of: " + root + "\n"
+                               "Supported image extensions are: " + ",".join(IMG_EXTENSIONS)))
+
+                print("Found {} images in subfolders of: {}".format(len(images), root))
+
+                self.root = root
+                self.images = images
+                self.transform = transform
+                self.loader = loader
+
+        def __getitem__(self, index):
+                image, label, path = self.images[index]
+                image = normalize(image)
+                if self.transform is not None:
+                        image = self.transform(image)
+
+                return image, label, path
+
+        def __len__(self):
+                return len(self.images)
+
+#Clear
 def load_data(train_dir, transform, data_name, config):
         if 'mnist' in data_name:
                 global dataset_size
@@ -142,11 +177,14 @@ def load_data(train_dir, transform, data_name, config):
                 return torch.utils.data.DataLoader(ImageFolder(train_dir, transform), batch_size=config.batch_size, shuffle=True, num_workers=config.workers, pin_memory=False)
         elif 'cifar10' in data_name:
                 return torch.utils.data.DataLoader(datasets.CIFAR10(train_dir, True, transform, download=True), batch_size=config.batch_size, shuffle=True, num_workers=config.workers, pin_memory=False)
+        elif 'malware' in data_name:
+                return torch.utils.data.DataLoader(CustomData(train_dir, transform), batch_size=config.batch_size, shuffle=True, num_workers=config.workers, pin_memory=False)
+
         elif 'test' in data_name:
                 return torch.utils.data.DataLoader(ImageFolder(train_dir, transform), batch_size=1, shuffle=False, num_workers=config.workers, pin_memory=False)
         else:
                 return
-
+#Clear
 def save_checkpoint(state, filename='checkpoint'):
     torch.save(state, filename + '.pth.tar')
 
@@ -161,6 +199,7 @@ def print_gan_log(epoch, epoches, iteration, iters, learning_rate,
               display, batch_time=batch_time,
               data_time=data_time, loss_D=D_losses, loss_G=G_losses))
 
+#Clear
 def print_vae_log(epoch, epoches, iteration, iters, learning_rate,
               display, batch_time, data_time, losses):
 
@@ -206,8 +245,8 @@ def plot_result2(fake, image_size, num_epoch, save_dir, name, fig_size=(8, 8), i
         plt.savefig(os.path.join(save_dir, 'vae_epoch_{}.png'.format(num_epoch)))
         plt.close()
 
-    elif name =="ssgan":
-        plt.savefig(os.path.join(save_dir, 'ssgan_epoch_{}.png'.format(num_epoch)))
+    elif name =="gan":
+        plt.savefig(os.path.join(save_dir, 'gan_epoch_{}.png'.format(num_epoch)))
         plt.close()
 
 def plot_result(G, fixed_noise, image_size, num_epoch, save_dir, name, fig_size=(8, 8), is_gray=False):
@@ -244,11 +283,11 @@ def plot_result(G, fixed_noise, image_size, num_epoch, save_dir, name, fig_size=
         plt.savefig(os.path.join(save_dir, 'vae_epoch_{}.png'.format(num_epoch)))
         plt.close()
     
-    elif name =="ssgan":
-        plt.savefig(os.path.join(save_dir, 'ssgan_epoch_{}.png'.format(num_epoch)))
+    elif name =="gan":
+        plt.savefig(os.path.join(save_dir, 'gan_epoch_{}.png'.format(num_epoch)))
         plt.close()
 
-    
+#Clear    
 def plot_loss(num_epoch, epoches, save_dir, **loss):
     fig, ax = plt.subplots() 
     ax.set_xlim(0,epoches + 1)
@@ -263,14 +302,30 @@ def plot_loss(num_epoch, epoches, save_dir, **loss):
         plt.plot([i for i in range(1, num_epoch + 1)], loss['d_loss'], label='Discriminator', color='red', linewidth=3)
         plt.plot([i for i in range(1, num_epoch + 1)], loss['g_loss'], label='Generator', color='mediumblue', linewidth=3)
         plt.legend()
-        plt.savefig(os.path.join(save_dir, 'DCGAN_loss_epoch_{}.png'.format(num_epoch)))
+        plt.savefig(os.path.join(os.path.join(save_dir, "loss"), 'gan_loss_epoch_{}.png'.format(num_epoch)))
     elif len(loss) == 1:
         plt.plot([i for i in range(1, num_epoch + 1)], loss['vae_loss'], label='vae_loss', color='red', linewidht=3)
         plt.legend()
-        plt.savefig(os.path.join(save_dir, 'vae_loss_epoch_{}.png'.format(num_epoch)))
+        plt.savefig(os.path.join(os.path.join(save_dir, "loss"), 'vae_loss_epoch_{}.png'.format(num_epoch)))
  
     plt.close()
 
+#Clear
+def plot_accuracy(num_epoch, epoches, save_dir, real_acc, fake_acc):
+	fig, ax = plt.subplots()
+	ax.set_xlim(0,epoches + 1)
+	ax.set_ylim(0, max(np.max(real_pred), np.max(fake_pred)) * 1.1)
+	plt.xlabel('Epoch {}'.format(num_epoch))
+	plt.ylabel('Accuracy')
+
+	plt.plot([i for i in range(1, num_epoch + 1)], real_acc, label='real data', color='red', linewidth=3)
+	plt.plot([i for i in range(1, num_epoch + 1)], fake_acc, label='fake data', color='mediumblue', linewidth=3)
+	plt.legend()
+	plt.savefig(os.path.join(os.path.join(save_dir, "accuracy"), 'gan_accuracy_epoch_{}.png'.format(num_epoch)))
+
+	plt.close()
+
+#Clear
 def create_gif(epoches, save_dir, name):
     if name == "dcgan":
         images = []
@@ -293,4 +348,23 @@ def create_gif(epoches, save_dir, name):
         for i in range(1, epoches + 1):
             images.append(imageio.imread(os.path.join(save_dir, 'DCGAN_loss_epoch_{}.png'.format(i))))
         imageio.mimsave(os.path.join(save_dir, 'anoGAN_result_loss.gif'), images, fps=5)
+	
+
+    elif name =="gan":
+        images = []
+        for i in range(1, epoches + 1):
+            images.append(imageio.imread(os.path.join(os.path.join(save_dir,'images'), 'gan_epoch_{}.png'.format(i))))
+        imageio.mimsave(os.path.join(os.path.join(save_dir,'images'), 'gan_images_result.gif'), images, fps=5)
+
+        images = []
+        for i in range(1, epoches + 1):
+            images.append(imageio.imread(os.path.join(os.path.join(save_dir,'loss'), 'gan_loss_epoch_{}.png'.format(i))))
+        imageio.mimsave(os.path.join(os.path.join(save_dir,'loss'), 'gan_losses_result.gif'), images, fps=5)
+
+        images = []
+        for i in range(1, epoches + 1):
+            images.append(imageio.imread(os.path.join(os.path.join(save_dir,'accuracy'), 'gan_accuracy_epoch_{}.png'.format(i))))
+        imageio.mimsave(os.path.join(os.path.join(save_dir,'accuracy'), 'gan_accuracy_result.gif'), images, fps=5)
+	
+	
 

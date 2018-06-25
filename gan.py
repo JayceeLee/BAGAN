@@ -35,11 +35,14 @@ if __name__ == "__main__":
 
 	if not os.path.exists(args.save_dir):
 		os.mkdir(os.path.join(args.root_dir, args.save_dir))
-	transform = transforms.Compose([
-        transforms.CenterCrop(150),
-        transforms.Scale(config.image_size),
-        transforms.ToTensor(),                     
-        transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
+	
+	#transform = transforms.Compose([
+        #transforms.CenterCrop(150),
+        #transforms.Scale(config.image_size),
+        #transforms.ToTensor(),                     
+        #transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
+
+	transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
 
 	if config.dataset == 'mnist':
 		train_loader = load_data(os.path.join(args.root_dir, args.train_dir), transform, 'mnist', config)
@@ -47,6 +50,8 @@ if __name__ == "__main__":
 		train_loader = load_data(os.path.join('/workspace/anoGAN', args.train_dir), transform, 'celebA', config)
 	elif config.dataset == 'cifar10':
 		train_loader = load_data(os.path.join(args.root_dir, args.train_dir), transform, 'cifar10', config)
+	elif config.dataset == 'malware':
+		train_loader = load_data(os.path.join(args.root_dir, args.train_dir), transform, 'malware', config)
 
 
 	distribution = torch.load(os.path.join(args.distribution_dir,'class_distribution.dt'))['distribution']
@@ -81,11 +86,11 @@ if __name__ == "__main__":
 		D_losses = AverageMeter()
 		G_losses = AverageMeter()
 
-		fixed_noise = torch.FloatTensor(8 * 8, config.z_dim, 1, 1).normal_(0, 1)
-		if use_cuda:
-			fixed_noise = fixed_noise.cuda(gpu)
-		with torch.no_grad():
-			fixed_noisev = fixed_noise
+		#fixed_noise = torch.FloatTensor(8 * 8, config.z_dim, 1, 1).normal_(0, 1)
+		#if use_cuda:
+		#	fixed_noise = fixed_noise.cuda(gpu)
+		#with torch.no_grad():
+		#	fixed_noisev = fixed_noise
 
 		end = time.time()
 		
@@ -102,15 +107,16 @@ if __name__ == "__main__":
 			total_fake = 0
 			correct_real = 0
 			correct_fake = 0
-			for i, (input, label) in enumerate(train_loader):
+			for i, (input, label, path) in enumerate(train_loader):
 				# Update 'D' : max log(D(x)) + log(1-D(G(z)))
 				data_time.update(time.time()-end)
 				batch_size = input.size(0)
 				fake_num = math.ceil(batch_size/config.class_num)	# For each batch, 1/(n+1) of total images are fake
-				conditional_z, z_label = conditional_latenent_generat(distribution, config.class_num, fake_num)
+				conditional_z, z_label = conditional_latent_generator(distribution, config.class_num, batch_size)
 	
 				label = label.long().squeeze() # "squeeze" : [batch, 1] --> [batch] ... e.g) [1,2,3,4...]		
-
+				print(label[0])
+				print(path[0])
 				if use_cuda:
 					input = input.cuda(gpu)
 					label = label.cuda(gpu)
@@ -121,7 +127,7 @@ if __name__ == "__main__":
 					real_label = real_label.cuda(gpu) 
 				
 				D_loss_real = criterion(D_real, real_label)
-				noise = conditional_z.view(-1, config.z_dim, 1, 1)
+				noise = conditional_z[0:fake_num].view(-1, config.z_dim, 1, 1)
 	
 				fake_label.resize_(noise.shape[0]).fill_(config.class_num)	# fake_label = '(num_class)+1'
 				if use_cuda:
@@ -132,7 +138,7 @@ if __name__ == "__main__":
 				fake = G(noise)
 	
 				_, D_fake = D(fake.detach())	# Fake image...
-				D_loss_fake = criterion(D_fake, z_label)	# Hmmmm...... fake_label? or z_label?
+				D_loss_fake = criterion(D_fake, fake_label)	# Hmmmm...... fake_label? or z_label?
 		
 				D_loss = D_loss_real + D_loss_fake
 				D_losses.update(D_loss.item())
@@ -142,6 +148,10 @@ if __name__ == "__main__":
 				optimizerD.step()
 
 				# Update 'G' : max log(D(G(z)))
+				noise = conditional_z.view(-1, config.z_dim, 1, 1)
+				if use_cuda:
+					noise = noise.cuda(gpu)
+				fake = G(noise)
 				_, D_fake = D(fake)
 				G_loss = criterion(D_fake, z_label)
 				G_losses.update(G_loss.data[0])
@@ -172,9 +182,12 @@ if __name__ == "__main__":
 					print_gan_log(epoch + 1, config.epoches, i + 1, len(train_loader), config.base_lr,
 	                          (i + 1) % config.display, batch_time, data_time, D_losses, G_losses)
 					#accuracy = masked_correct.item()/max(1.0, num_samples.item())
-					plot_result2(fake, config.image_size, epoch + 1, args.save_dir, 'ssgan', is_gray=(config.c_dim == 1))
-					print('Real Accuracy : {}'.format(100 * correct_real / total_real))
-					print('Fake Accuracy : {}'.format(100 * correct_fake / total_fake))
+					plot_result2(fake, config.image_size, epoch + 1, args.save_dir, 'gan', is_gray=(config.c_dim == 1))
+					real_acc = 100 * correct_real / total_real
+					fake_acc = 100 * correct_fake / total_fake
+					print('Real Accuracy : {}'.format(real_acc))
+					print('Fake Accuracy : {}'.format(fake_acc))
+					plot_accuracy(epoch+1, config.epoches, args.save_dir, real_acc, fake_acc)
 					batch_time.reset()
 					data_time.reset()
 
@@ -184,10 +197,10 @@ if __name__ == "__main__":
 			D_losses.reset()
 			G_losses.reset()
 
-			plot_result(G, fixed_noisev, config.image_size, epoch + 1, args.save_dir, 'ssgan', is_gray=(config.c_dim == 1))
+			plot_result(G, fixed_noisev, config.image_size, epoch + 1, args.save_dir, 'gan', is_gray=(config.c_dim == 1))
 			plot_loss(epoch+1, config.epoches, args.save_dir, d_loss=D_loss_list, g_loss=G_loss_list)
 			# save the D and G.
 			save_checkpoint({'epoch': epoch, 'state_dict': D.state_dict(),}, os.path.join(os.path.join(args.checkpoint_dir,'gan'), 'D_epoch_{}'.format(epoch)))
 			save_checkpoint({'epoch': epoch, 'state_dict': G.state_dict(),}, os.path.join(os.path.join(args.checkpoint_dir,'gan'), 'G_epoch_{}'.format(epoch)))
 	
-		create_gif(config.epoches, args.save_dir, 'ssgan')
+		create_gif(config.epoches, args.save_dir, 'gan')

@@ -34,11 +34,14 @@ if __name__ == "__main__":
 
 	if not os.path.exists(args.save_dir):
 		os.mkdir(os.path.join(args.root_dir, args.save_dir))
-	transform = transforms.Compose([
-        transforms.CenterCrop(150),
-        transforms.Scale(config.image_size),
-        transforms.ToTensor(),                     
-        transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
+	
+	#transform = transforms.Compose([
+        #transforms.CenterCrop(150),
+        #transforms.Scale(config.image_size),
+        #transforms.ToTensor(),                     
+        #transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
+
+	transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))])
 
 	if config.dataset == 'mnist':
 		train_loader = load_data(os.path.join(args.root_dir, args.train_dir), transform, 'mnist', config)
